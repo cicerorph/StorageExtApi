@@ -4,6 +4,7 @@ import { MongoClient, Db } from "mongodb";
 import { configure, getConsoleSink, getLogger } from "@logtape/logtape";
 import { prettyFormatter } from "@logtape/pretty";
 import { honoLogger } from "@logtape/hono";
+import { S3Client } from "bun";
 
 await configure({
   sinks: { console: getConsoleSink({ formatter: prettyFormatter }) },
@@ -20,7 +21,10 @@ app.use(honoLogger());
 
 const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017";
 const DB_NAME = process.env.DB_NAME || "kv_store";
+const MAX_VALUE_SIZE = 256 * 1024; // 256KB
+
 let db: Db;
+let s3Client: S3Client;
 
 let totalRequests = 0;
 const timedOutIPs = new Map<string, number>();
@@ -114,6 +118,26 @@ function getClientIP(c: any): string {
   return "unknown";
 }
 
+function generateS3Key(project: string, key: string): string {
+  if (!project) {
+    return `global/${key}`;
+  }
+  return `${project}/${key}`;
+}
+
+async function uploadToS3(key: string, value: string): Promise<void> {
+  await s3Client.write(key, value);
+}
+
+async function downloadFromS3(key: string): Promise<string> {
+  const s3file = s3Client.file(key);
+  return await s3file.text();
+}
+
+async function deleteFromS3(key: string): Promise<void> {
+  await s3Client.delete(key);
+}
+
 app.use("*", cors({
   origin: "*",
   allowMethods: ["GET", "POST", "DELETE", "OPTIONS"],
@@ -150,7 +174,10 @@ app.get("/get", async (c) => {
       return c.json({ error: "KeyFileNonExistent" }, 400);
     }
 
-    return c.text(doc.val);
+    const s3Key = generateS3Key(project, key);
+    const value = await downloadFromS3(s3Key);
+
+    return c.text(value);
   } catch (err) {
     logger.error(err?.toString() || "unknown error");
     return c.json({ error: "InternalServerError" }, 500);
@@ -180,15 +207,35 @@ app.post("/set", async (c) => {
       return c.json({ error: "InvalidBody" }, 400);
     }
 
+    const valueSize = Buffer.byteLength(val, "utf8");
+    if (valueSize > MAX_VALUE_SIZE) {
+      return c.json({ error: "ValueTooLarge", maxSize: MAX_VALUE_SIZE }, 413);
+    }
+
     if (includesFile(val)) {
       timedOutIPs.set(ip, Date.now() + 10000); // 10s
       return c.json({ error: "IncludesFile" }, 403);
     }
 
+    const s3Key = generateS3Key(project, key);
+    await uploadToS3(s3Key, val);
+
     const collection = db.collection("kv");
     await collection.updateOne(
       { project, key },
-      { $set: { project, key, val, set_by: ip } },
+      { 
+        $set: { 
+          project, 
+          key, 
+          s3_key: s3Key,
+          size: valueSize,
+          set_by: ip,
+          updated_at: new Date()
+        },
+        $setOnInsert: {
+          created_at: new Date()
+        }
+      },
       { upsert: true }
     );
 
@@ -209,6 +256,13 @@ app.delete("/delete", async (c) => {
 
   try {
     const collection = db.collection("kv");
+    const doc = await collection.findOne({ project, key });
+
+    if (doc) {
+      const s3Key = generateS3Key(project, key);
+      await deleteFromS3(s3Key);
+    }
+
     await collection.deleteOne({ project, key });
 
     return c.json({ success: true });
@@ -220,6 +274,15 @@ app.delete("/delete", async (c) => {
 
 async function init() {
   try {
+    s3Client = new S3Client({
+      accessKeyId: process.env.S3_ACCESS_KEY_ID,
+      secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
+      bucket: process.env.S3_BUCKET,
+      region: process.env.S3_REGION,
+      endpoint: process.env.S3_ENDPOINT,
+    });
+    logger.info("initialized the s3 client");
+
     const client = new MongoClient(MONGO_URI);
     await client.connect();
     logger.info("connected to db");
