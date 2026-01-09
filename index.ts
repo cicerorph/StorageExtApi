@@ -90,7 +90,7 @@ function includesFile(input: string): boolean {
       if (decoded.length >= header.length) {
         const matches = header.every((byte, i) => decoded[i] === byte);
         if (matches) {
-          logger.info(`file detected with header: ${header.map(b => b.toString(16)).join(" ")}`);
+          logger.warn(`file detected with header: ${header.map(b => b.toString(16)).join(" ")}`);
           return true;
         }
       }
