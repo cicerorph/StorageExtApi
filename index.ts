@@ -7,10 +7,13 @@ import { honoLogger } from "@logtape/hono";
 import { S3Client } from "bun";
 
 await configure({
-  sinks: { console: getConsoleSink({ formatter: prettyFormatter }) },
+  sinks: { 
+    console: getConsoleSink({ formatter: prettyFormatter }),
+    file: getFileSink("app.log"),
+  },
   loggers: [
-    { category: ["hono"], sinks: ["console"], lowestLevel: "info" },
-    { category: ["logtape", "meta"], sinks: ["console"], lowestLevel: "warning" }
+    { category: ["hono"], sinks: ["console", "file"], lowestLevel: "info" },
+    { category: ["logtape", "meta"], sinks: ["console", "file"], lowestLevel: "warning" }
   ],
 });
 
