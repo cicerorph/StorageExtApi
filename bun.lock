@@ -4,6 +4,7 @@
     "": {
       "name": "storageapiserver",
       "dependencies": {
+        "@logtape/file": "^2.0.2",
         "@logtape/hono": "^1.3.5",
         "@logtape/logtape": "^1.3.5",
         "@logtape/pretty": "^1.3.5",
@@ -20,6 +21,8 @@
     },
   },
   "packages": {
+    "@logtape/file": ["@logtape/file@2.0.2", "", { "peerDependencies": { "@logtape/logtape": "^2.0.2" } }, "sha512-M+xrTu1B+7IGhXqvZlT2mxnY2u1y/6K8Tp16MMwx16rSdz7CKGaXzlq3RLQYrz1GqtduvqGLHB7Hat1XXnb8VQ=="],
+
     "@logtape/hono": ["@logtape/hono@1.3.5", "", { "peerDependencies": { "@logtape/logtape": "^1.3.5", "hono": "^4.0.0" } }, "sha512-yf4xEg4uJZV/o+WKPVnci/hEVkIPYxqEqTItczgNlZ5LMvfwYzrNZQhHUu9HV8oY7j6KRUoiY2hUxrs8toCnZQ=="],
 
     "@logtape/logtape": ["@logtape/logtape@1.3.5", "", {}, "sha512-G+MxWB7Tbv/2764519+Cp6rKXUdRbe/GiRwTvlm/Wv/sNsiquRnx9Hzr9eXaIpAYLT4PrBlkthjJ4gmqdSPrFg=="],

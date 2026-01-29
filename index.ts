@@ -1,19 +1,24 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { MongoClient, Db } from "mongodb";
+import { getFileSink } from "@logtape/file";
 import { configure, getConsoleSink, getLogger } from "@logtape/logtape";
 import { prettyFormatter } from "@logtape/pretty";
 import { honoLogger } from "@logtape/hono";
 import { S3Client } from "bun";
 
 await configure({
-  sinks: { 
+  sinks: {
     console: getConsoleSink({ formatter: prettyFormatter }),
-    //file: getFileSink("app.log"),
+    file: getFileSink("app.log"),
   },
   loggers: [
-    { category: ["hono"], sinks: ["console"], lowestLevel: "info" },
-    { category: ["logtape", "meta"], sinks: ["console"], lowestLevel: "warning" }
+    { category: ["hono"], sinks: ["console", "file"], lowestLevel: "info" },
+    {
+      category: ["logtape", "meta"],
+      sinks: ["console", "file"],
+      lowestLevel: "warning",
+    },
   ],
 });
 
@@ -32,7 +37,7 @@ let s3Client: S3Client;
 let totalRequests = 0;
 const timedOutIPs = new Map<string, number>();
 
-// file headers for detection inside base64 strings 
+// file headers for detection inside base64 strings
 // I copied these from the original project hehehe
 const fileHeaders = [
   [0x42, 0x4d], // .bmp
@@ -93,7 +98,9 @@ function includesFile(input: string): boolean {
       if (decoded.length >= header.length) {
         const matches = header.every((byte, i) => decoded[i] === byte);
         if (matches) {
-          logger.warn(`file detected with header: ${header.map(b => b.toString(16)).join(" ")}`);
+          logger.warn(
+            `file detected with header: ${header.map((b) => b.toString(16)).join(" ")}`,
+          );
           return true;
         }
       }
@@ -141,13 +148,16 @@ async function deleteFromS3(key: string): Promise<void> {
   await s3Client.delete(key);
 }
 
-app.use("*", cors({
-  origin: "*",
-  allowMethods: ["GET", "POST", "DELETE", "OPTIONS"],
-  allowHeaders: ["*"],
-  credentials: true,
-  maxAge: 300,
-}));
+app.use(
+  "*",
+  cors({
+    origin: "*",
+    allowMethods: ["GET", "POST", "DELETE", "OPTIONS"],
+    allowHeaders: ["*"],
+    credentials: true,
+    maxAge: 300,
+  }),
+);
 
 app.use("*", async (c, next) => {
   totalRequests++;
@@ -226,20 +236,20 @@ app.post("/set", async (c) => {
     const collection = db.collection("kv");
     await collection.updateOne(
       { project, key },
-      { 
-        $set: { 
-          project, 
-          key, 
+      {
+        $set: {
+          project,
+          key,
           s3_key: s3Key,
           size: valueSize,
           set_by: ip,
-          updated_at: new Date()
+          updated_at: new Date(),
         },
         $setOnInsert: {
-          created_at: new Date()
-        }
+          created_at: new Date(),
+        },
       },
-      { upsert: true }
+      { upsert: true },
     );
 
     return c.json({ success: true });
@@ -292,7 +302,9 @@ async function init() {
 
     db = client.db(DB_NAME);
 
-    await db.collection("kv").createIndex({ project: 1, key: 1 }, { unique: true });
+    await db
+      .collection("kv")
+      .createIndex({ project: 1, key: 1 }, { unique: true });
 
     const port = parseInt(process.env.PORT || "3000");
     logger.info(`server starting on port ${port}`);
