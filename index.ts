@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { MongoClient, Db } from "mongodb";
-import { configure, getConsoleSink, getLogger } from "@logtape/logtape";
+import { configure, getConsoleSink, getLogger, getFileSink } from "@logtape/logtape";
 import { prettyFormatter } from "@logtape/pretty";
 import { honoLogger } from "@logtape/hono";
 import { S3Client } from "bun";
