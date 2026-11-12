@@ -1,6 +1,5 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { MongoClient, Db } from "mongodb";
 import { getFileSink } from "@logtape/file";
 import { configure, getConsoleSink, getLogger } from "@logtape/logtape";
 import { prettyFormatter } from "@logtape/pretty";
@@ -27,11 +26,8 @@ const logger = getLogger("hono");
 const app = new Hono();
 app.use(honoLogger());
 
-const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017";
-const DB_NAME = process.env.DB_NAME || "kv_store";
 const MAX_VALUE_SIZE = 256 * 1024; // 256KB
 
-let db: Db;
 let s3Client: S3Client;
 
 let totalRequests = 0;
@@ -139,8 +135,11 @@ async function uploadToS3(key: string, value: string): Promise<void> {
   await s3Client.write(key, value);
 }
 
-async function downloadFromS3(key: string): Promise<string> {
+async function downloadFromS3(key: string): Promise<string | null> {
   const s3file = s3Client.file(key);
+  if (!(await s3file.exists())) {
+    return null;
+  }
   return await s3file.text();
 }
 
@@ -180,15 +179,12 @@ app.get("/get", async (c) => {
   const project = c.req.query("project") || "";
 
   try {
-    const collection = db.collection("kv");
-    const doc = await collection.findOne({ project, key });
-
-    if (!doc) {
-      return c.json({ error: "KeyFileNonExistent" }, 400);
-    }
-
     const s3Key = generateS3Key(project, key);
     const value = await downloadFromS3(s3Key);
+
+    if (value === null) {
+      return c.json({ error: "KeyFileNonExistent" }, 400);
+    }
 
     return c.text(value);
   } catch (err) {
@@ -233,25 +229,6 @@ app.post("/set", async (c) => {
     const s3Key = generateS3Key(project, key);
     await uploadToS3(s3Key, val);
 
-    const collection = db.collection("kv");
-    await collection.updateOne(
-      { project, key },
-      {
-        $set: {
-          project,
-          key,
-          s3_key: s3Key,
-          size: valueSize,
-          set_by: ip,
-          updated_at: new Date(),
-        },
-        $setOnInsert: {
-          created_at: new Date(),
-        },
-      },
-      { upsert: true },
-    );
-
     return c.json({ success: true });
   } catch (err) {
     logger.error(err?.toString() || "unknown error");
@@ -268,15 +245,8 @@ app.delete("/delete", async (c) => {
   const project = c.req.query("project") || "";
 
   try {
-    const collection = db.collection("kv");
-    const doc = await collection.findOne({ project, key });
-
-    if (doc) {
-      const s3Key = generateS3Key(project, key);
-      await deleteFromS3(s3Key);
-    }
-
-    await collection.deleteOne({ project, key });
+    const s3Key = generateS3Key(project, key);
+    await deleteFromS3(s3Key);
 
     return c.json({ success: true });
   } catch (err) {
@@ -295,16 +265,6 @@ async function init() {
       endpoint: process.env.S3_ENDPOINT,
     });
     logger.info("initialized the s3 client");
-
-    const client = new MongoClient(MONGO_URI);
-    await client.connect();
-    logger.info("connected to db");
-
-    db = client.db(DB_NAME);
-
-    await db
-      .collection("kv")
-      .createIndex({ project: 1, key: 1 }, { unique: true });
 
     const port = parseInt(process.env.PORT || "3000");
     logger.info(`server starting on port ${port}`);
